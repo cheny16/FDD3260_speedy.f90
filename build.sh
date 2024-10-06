@@ -8,7 +8,17 @@ if [ -z "$NETCDF" ]; then
 fi
 
 # Name of makefile
-MAKE=gfortran.makefile
+if [ "$1" = "--target" ]; then
+    if [ "$2" = "intel" ]; then
+	MAKE=intel.makefile
+    fi
+    if [ "$2" = "intelomp" ]; then
+	MAKE=intel_omp.makefile
+    fi
+    if [ "$2" = "general" ]; then
+	MAKE=gfortran.makefile
+    fi
+fi
 
 # Define directory names
 ROOT=`pwd`
@@ -27,10 +37,6 @@ cp $SRC/$MAKE .
 # Compile SPEEDY and delete source files
 make -f $MAKE -s clean
 echo 'Compiling SPEEDY'
-if [ "$1" = "--profile" ]; then
-    make -f $MAKE -s profile || { echo "Compilation failed"; exit 1; }
-else
-    make -f $MAKE -s || { echo "Compilation failed"; exit 1; }
-fi
 
+make -f $MAKE -s && { echo "Compilation successful"; } || { echo "Compilation failed"; exit 1; }
 rm *.f90 *.o $MAKE *.mod
