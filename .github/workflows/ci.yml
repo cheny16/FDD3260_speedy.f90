@@ -10,8 +10,7 @@ on:
       - 'build.sh'
       - 'run.sh'
       - 'namelist.nml'
-    paths-ignore:
-      - 'README.md'
+
   pull_request:
     branches:
       - main
@@ -21,8 +20,6 @@ on:
       - 'build.sh'
       - 'run.sh'
       - 'namelist.nml'
-    paths-ignore:
-      - 'README.md'
 
 jobs:
   build:
