@@ -9,7 +9,6 @@ on:
       - '**/*.f90'
       - 'build.sh'
       - 'run.sh'
-      - 'namelist.nml'
 
   pull_request:
     branches:
