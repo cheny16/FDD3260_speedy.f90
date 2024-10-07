@@ -85,7 +85,10 @@ contains
         ! =========================================================================
         ! Convert prognostics to grid point space
         ! =========================================================================
-
+        
+        
+        !$omp parallel shared(vorg, divg, tg, trg, ug, vg, coriol)
+        !$omp do private(k, itr, i, j, dumc)
         do k = 1, kx
             vorg(:,:,k) = spec_to_grid(vor(:,:,k,j2), 1)
             divg(:,:,k) = spec_to_grid(div(:,:,k,j2), 1)
@@ -105,85 +108,159 @@ contains
                 end do
             end do
         end do
+        !$omp end do
 
+        !$omp single
         umean(:,:) = 0.0
         vmean(:,:) = 0.0
         dmean(:,:) = 0.0
+        !$omp end single
 
+        !$omp do reduction(+:umean, vmean, dmean) private(k)
         do k = 1, kx
             umean(:,:) = umean(:,:) + ug(:,:,k) * dhs(k)
             vmean(:,:) = vmean(:,:) + vg(:,:,k) * dhs(k)
             dmean(:,:) = dmean(:,:) + divg(:,:,k) * dhs(k)
         end do
+        !$omp end do nowait
 
         ! Compute tendency of log(surface pressure)
         ! ps(1,1,j2)=zero
+
+        !$omp single
         call grad(ps(:,:,j2), dumc(:,:,1), dumc(:,:,2))
+        !$omp end single
+
+        !!! TODO: make [spec_to_grid] -> [legendre_inv] thread-safe
+        !$omp single
         px = spec_to_grid(dumc(:,:,1), 2)
         py = spec_to_grid(dumc(:,:,2), 2)
+        !$omp end single
 
+        !$omp taskwait
+        
+        !$omp single
         psdt = grid_to_spec(-umean*px - vmean*py)
         psdt(1,1) = (0.0, 0.0)
+        !$omp end single
 
         ! Compute "vertical" velocity
+
+#ifdef _OPENMP
+        !$omp single
+            !$omp task
+            sigdt(:,:,1) = 0.0
+            !$omp end task
+
+            !$omp task
+            sigdt(:,:,kx+1) = 0.0
+            !$omp end task
+
+            !$omp task
+            sigm(:,:,1) = 0.0
+            !$omp end task
+
+            !$omp task
+            sigm(:,:,kx+1) = 0.0
+            !$omp end task
+        !$omp end single
+#else
         sigdt(:,:,1) = 0.0
         sigdt(:,:,kx+1) = 0.0
         sigm(:,:,1) = 0.0
         sigm(:,:,kx+1) = 0.0
+#endif
 
         ! (The following combination of terms is utilized later in the
         !     temperature equation)
+
+        !$omp do private(k)
         do k = 1, kx
             puv(:,:,k) = (ug(:,:,k) - umean) * px + (vg(:,:,k) - vmean) * py
         end do
+        !$omp end do
 
+        !!! cannot be par due to dependencies, but can be async
+        !$omp single
         do k = 1, kx
             sigdt(:,:,k+1) = sigdt(:,:,k) - dhs(k)*(puv(:,:,k)+divg(:,:,k)-dmean)
             sigm(:,:,k+1) = sigm(:,:,k) - dhs(k)*puv(:,:,k)
         end do
+        !$omp end single nowait
 
         ! Subtract part of temperature field that is used as reference for
         ! implicit terms
+
+        !$omp do private(k)
         do k = 1, kx
             tgg(:,:,k) = tg(:,:,k) - tref(k)
         end do
+        !$omp end do
 
         ! Zonal wind tendency
+#ifdef _OPENMP
+        !$omp single
+            !$omp task
+            temp(:,:,1) = 0.0
+            !$omp end task
+
+            !$omp task
+            temp(:,:,kx+1) = 0.0
+            !$omp end task
+        !$omp end single
+#else
         temp(:,:,1) = 0.0
         temp(:,:,kx+1) = 0.0
+#endif
 
+        !$omp do private(k)
         do k = 2, kx
             temp(:,:,k) = sigdt(:,:,k) * (ug(:,:,k) - ug(:,:,k-1))
         end do
-
+        !$omp end do
+        
+        !$omp do private(k)
         do k = 1, kx
             utend(:,:,k) = vg(:,:,k) * vorg(:,:,k) - tgg(:,:,k)*rgas*px &
                 & - (temp(:,:,k+1) + temp(:,:,k))*dhsr(k)
         end do
+        !$omp end do
 
         ! Meridional wind tendency
+
+        !$omp do private(k)
         do k = 2, kx
             temp(:,:,k) = sigdt(:,:,k) * (vg(:,:,k) - vg(:,:,k-1))
         end do
+        !$omp end do
 
+        !$omp do private(k)
         do k = 1, kx
             vtend(:,:,k) = -ug(:,:,k)*vorg(:,:,k) - tgg(:,:,k)*rgas*py &
                 & - (temp(:,:,k+1) + temp(:,:,k))*dhsr(k)
         end do
+        !$omp end do
 
         ! Temperature tendency
+
+        !$omp do private(k)
         do k = 2, kx
             temp(:,:,k) = sigdt(:,:,k)*(tgg(:,:,k) - tgg(:,:,k-1)) &
                 & + sigm(:,:,k)*(tref(k) - tref(k-1))
         end do
+        !$omp end do
 
+        !$omp do private(k)
         do k = 1, kx
             ttend(:,:,k) = tgg(:,:,k)*divg(:,:,k) - (temp(:,:,k+1)+temp(:,:,k))*dhsr(k) &
                 & + fsgr(k)*tgg(:,:,k)*(sigdt(:,:,k+1) + sigdt(:,:,k)) + tref3(k)*(sigm(:,:,k+1) &
                 & + sigm(:,:,k)) + akap*(tg(:,:,k)*puv(:,:,k) - tgg(:,:,k)*dmean(:,:))
         end do
+        !$omp end do
 
         ! Tracer tendency
+
+        !$omp do private(itr, k)
         do itr = 1, ntr
             do k = 2, kx
                 temp(:,:,k) = sigdt(:,:,k)*(trg(:,:,k,itr) - trg(:,:,k-1,itr))
@@ -195,6 +272,9 @@ contains
                 trtend(:,:,k,itr) = trg(:,:,k,itr)*divg(:,:,k)-(temp(:,:,k+1) + temp(:,:,k))*dhsr(k)
             end do
         end do
+        !$omp end do
+
+        !$omp end parallel
 
         ! =========================================================================
         ! Compute physical tendencies
@@ -202,6 +282,8 @@ contains
 
         phi = get_geopotential(t(:,:,:,j1), phis)
 
+        !!! TODO: make [get_physical_tendencies] multi-threaded and thread-safe
+        
         call get_physical_tendencies(vor(:,:,:,j1), div(:,:,:,j1), t(:,:,:,j1), tr(:,:,:,j1,1), &
             & phi, ps(:,:,j1), utend, vtend, ttend, trtend)
 
@@ -209,6 +291,8 @@ contains
         ! Convert tendencies to spectral space
         ! =========================================================================
 
+        !$omp parallel default(shared) private(k, itr, dumc)
+        !$omp do schedule(static)
         do k = 1, kx
             !  Convert u and v tendencies to vor and div spectral tendencies
             !  vdspec takes a grid u and a grid v and converts them to
@@ -232,6 +316,8 @@ contains
                 trdt(:,:,k,itr) = trdt(:,:,k,itr) + grid_to_spec(trtend(:,:,k,itr))
             end do
         end do
+        !$omp end do
+        !$omp end parallel
     end subroutine
 
     ! Compute spectral tendencies of divergence, temperature  and log(surface pressure)
