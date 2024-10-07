@@ -14,6 +14,7 @@ program speedy
     use diagnostics, only: check_diagnostics
     use prognostics, only: vor, div, t, ps, tr, phi
     use forcing, only: set_forcing
+    use omp_lib
 
     implicit none
 
@@ -22,6 +23,20 @@ program speedy
 
     ! Initialization
     call initialize
+
+#ifdef _OPENMP
+#ifdef INFO
+    !$omp parallel
+    !$omp single
+    print *, new_line('a')
+    print *, "================================================="
+    print *, " Using OpenMP with threads:        ", omp_get_num_threads()
+    print *, " OpenMP version:                   ", _OPENMP
+    print *, "=================================================", new_line('a')
+    !$omp end single
+    !$omp end parallel
+#endif
+#endif
 
     ! Model main loop
     do while (.not. datetime_equal(model_datetime, end_datetime))
