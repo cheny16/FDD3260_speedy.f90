@@ -1,4 +1,4 @@
-name: CI for speedy.f90
+name: OMP building CI test with gfortran
 
 on:
   push:
@@ -43,7 +43,7 @@ jobs:
       - name: Compile the Fortran project
         run: |
           export NETCDF=$(nc-config --prefix)
-          bash build.sh --target general | tee compile.out
+          bash build.sh --target genomp | tee compile.out
 
       # Step 5: Check for compilation
       - name: Check for compilation
