@@ -3,19 +3,16 @@ FC=ifort
 
 # Set variables depending on target
 default : COMPOPTS = $(OPT) $(BASE)
-profile : COMPOPTS = -pg $(BASE)
 
 # Default
 default : base_target
 
-# For profiling
-profile : base_target
-
 # Base compiler options (always used)
-BASE=-convert big_endian -warn all
+BASE=-fpp -g
+#BASE=-g -fpe0 -qopenmp
 
 # Optimisation flags (disabled for debugging, profiling etc.)
-OPT=-Ofast
+#OPT=-Ofast
 
 # # Location of NetCDF module (netcdf.mod)
 INC=-I$(NETCDF)/include
