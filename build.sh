@@ -15,8 +15,14 @@ if [ "$1" = "--target" ]; then
     if [ "$2" = "intelomp" ]; then
 	MAKE=intel_omp.makefile
     fi
+    if [ "$2" = "intelacc" ]; then
+	MAKE=intel_acc.makefile
+    fi
     if [ "$2" = "general" ]; then
 	MAKE=gfortran.makefile
+    fi
+    if [ "$2" = "genomp" ]; then
+	MAKE=gfortran_omp.makefile
     fi
 fi
 
