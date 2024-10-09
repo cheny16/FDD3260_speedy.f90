@@ -1,4 +1,7 @@
 # Parallel Speedy.f90 towards Multi-core Processors
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/cheny16/FDD3260_speedy.f90/general.yml)
+
+
 This is an implementation of parallel [Speedy.f90](https://github.com/samhatfield/speedy.f90) software for multi-core processors.
 
 Original project is from: https://github.com/samhatfield/speedy.f90
