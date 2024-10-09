@@ -35,3 +35,4 @@ Edit the parameters in [namelist.mnl](https://github.com/cheny16/FDD3260_speedy.
 
 ## Possible runtime errors
 - "Segmentation fault" when omp enabled: try `ulimit -s unlimited`.
+- Multiple threads not monitored: `setenv OMP_DYNAMIC false` or `export OMP_DYNAMIC=FALSE`.
