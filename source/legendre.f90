@@ -4,6 +4,7 @@
 module legendre
     use types, only: p
     use params
+    use omp_lib
 
     implicit none
 
@@ -30,16 +31,36 @@ contains
         ! pole to equator
         wt = get_weights()
 
+#ifdef _OPENMP
+        ! Compute mm(m) outside the loop over n
+        do m = 1, mx
+            mm(m) = m - 1
+        end do
+
+        ! Parallelize the loop over n
+        !$omp parallel do private(m)
+        do n = 1, nx
+            nsh2(n) = 0
+            do m = 1, mx
+                wavenum_tot(m,n) = mm(m) + n - 1
+                if (wavenum_tot(m,n) <= (trunc + 1) .or. ix /= 4*iy) then
+                    nsh2(n) = nsh2(n) + 2
+                end if
+            end do
+        end do
+        !$omp end parallel do
+#else
         do n = 1, nx
             nsh2(n) = 0
             do m = 1, mx
                 mm(m) = m - 1
                 wavenum_tot(m,n) = mm(m) + n - 1
                 if (wavenum_tot(m,n) <= (trunc + 1) .or. ix /= 4*iy) nsh2(n) = nsh2(n) + 2
-
             end do
         end do
+#endif
 
+        !$omp parallel do private(emm2, ell2)
         do m = 1, mx + 1
             do n = 1, nx + 1
                 emm2 = float(m - 1)**2
@@ -55,8 +76,11 @@ contains
                 if (epsi(m,n) > 0.) repsi(m,n) = 1.0/epsi(m,n)
             end do
         end do
+        !$omp end parallel do
 
         ! Generate associated Legendre polynomials
+
+        !$omp parallel do private(poly, n, m, m1, m2)
         do j = 1, iy
             poly = get_legendre_poly(j)
             do n = 1, nx
@@ -68,6 +92,7 @@ contains
                 end do
             end do
         end do
+        !$omp end parallel do
     end subroutine
 
     !> Computes inverse Legendre transformation.
@@ -81,6 +106,8 @@ contains
 
         ! Loop over Northern Hemisphere, computing odd and even decomposition of
         ! incoming field
+
+        !$omp parallel do private(j1, even, odd, n, m)
         do j = 1, iy
             j1 = il + 1 - j
 
@@ -108,6 +135,7 @@ contains
             ! Compute Northern Hemisphere
             output(:,j)  = even - odd
         end do
+        !$omp end parallel do
     end function
 
     !> Computes direct Legendre transformation.
@@ -124,6 +152,8 @@ contains
 
         ! Loop over Northern Hemisphere, computing odd and even decomposition of
         ! incoming field. The Legendre weights (wt) are applied here
+
+        !$omp parallel do private(j1)
         do j = 1, iy
             ! Corresponding Southern Hemisphere latitude
             j1 = il + 1 - j
@@ -131,6 +161,7 @@ contains
             even(:,j) = (input(:,j1) + input(:,j))*wt(j)
             odd(:,j)  = (input(:,j1) - input(:,j))*wt(j)
         end do
+        !$omp end parallel do
 
         ! The parity of an associated Legendre polynomial is the same
         ! as the parity of n' - m'. n', m' are the actual total wavenumber and zonal
@@ -139,19 +170,25 @@ contains
 
         ! Loop over coefficients corresponding to even associated Legendre
         ! polynomials
+
+        !$omp parallel do private(m)
         do n = 1, trunc + 1, 2
             do m = 1, nsh2(n)
                 output(m,n) = dot_product(cpol(m,n,:iy), even(m,:iy))
             end do
         end do
+        !$omp end parallel do
 
         ! Loop over coefficients corresponding to odd associated Legendre
         ! polynomials
+
+        !$omp parallel do private(m)
         do n = 2, trunc + 1, 2
             do m = 1, nsh2(n)
                 output(m,n) = dot_product(cpol(m,n,:iy), odd(m,:iy))
             end do
         end do
+        !$omp end parallel do
     end function
 
     !> Compute Gaussian weights for direct Legendre transform
