@@ -3,10 +3,10 @@
 
 
 
-This is an implementation of parallel [Speedy.f90](https://github.com/samhatfield/speedy.f90) software for multi-core processors.
+This is an implementation of parallel [speedy.f90](https://github.com/samhatfield/speedy.f90) software for multi-core processors.
 
-Original project is from: https://github.com/samhatfield/speedy.f90
-
+> Original project is from: https://github.com/samhatfield/speedy.f90
+> 
 > speedy.f90 is an intermediate complexity atmospheric general circulation model written in modern Fortran. It is based on SPEEDY, developed by Fred Kucharski, Franco Molteni and Martin P. King.
 > Zenodo DOI: 10.5281/zenodo.5816982
 
@@ -36,6 +36,30 @@ Steps for installation are basically the same as the original speedy.f90, but wi
 
 ## Run
 Edit the parameters in [namelist.mnl](https://github.com/cheny16/FDD3260_speedy.f90/blob/main/namelist.nml) if necessary, then `bash run.sh`.
+
+Most commonly used parameters in our experiments:
+```yaml
+! nsteps_out = model variables are output every nsteps_out timesteps
+! nstdia     = model diagnostics are printed every nstdia timesteps
+&params
+nsteps_out = 100
+nstdia     = 180
+/
+! start_datetime = the start datetime of the model integration
+! end_datetime   = the end datetime of the model integration
+&date
+start_datetime%year   = 1982
+start_datetime%month  = 1
+start_datetime%day    = 1
+start_datetime%hour   = 0
+start_datetime%minute = 0
+end_datetime%year     = 1982
+end_datetime%month    = 2
+end_datetime%day      = 1
+end_datetime%hour     = 0
+end_datetime%minute   = 0
+/
+```
 
 ## Possible runtime errors
 - "Segmentation fault" when omp enabled: try `ulimit -s unlimited`.
