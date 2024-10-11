@@ -2,6 +2,8 @@ module tendencies
     use types, only: p
     use params
 
+    use omp_lib
+    
     implicit none
 
     private
@@ -88,7 +90,7 @@ contains
         
         
         !$omp parallel shared(vorg, divg, tg, trg, ug, vg, coriol)
-        !$omp do private(k, itr, i, j, dumc)
+        !$omp do private(k, itr, i, j, dumc) schedule(guided)
         do k = 1, kx
             vorg(:,:,k) = spec_to_grid(vor(:,:,k,j2), 1)
             divg(:,:,k) = spec_to_grid(div(:,:,k,j2), 1)
@@ -116,7 +118,7 @@ contains
         dmean(:,:) = 0.0
         !$omp end single
 
-        !$omp do reduction(+:umean, vmean, dmean) private(k)
+        !$omp do reduction(+:umean, vmean, dmean) private(k) schedule(guided)
         do k = 1, kx
             umean(:,:) = umean(:,:) + ug(:,:,k) * dhs(k)
             vmean(:,:) = vmean(:,:) + vg(:,:,k) * dhs(k)
@@ -136,8 +138,6 @@ contains
         px = spec_to_grid(dumc(:,:,1), 2)
         py = spec_to_grid(dumc(:,:,2), 2)
         !$omp end single
-
-        !$omp taskwait
         
         !$omp single
         psdt = grid_to_spec(-umean*px - vmean*py)
@@ -174,7 +174,7 @@ contains
         ! (The following combination of terms is utilized later in the
         !     temperature equation)
 
-        !$omp do private(k)
+        !$omp do private(k) schedule(static)
         do k = 1, kx
             puv(:,:,k) = (ug(:,:,k) - umean) * px + (vg(:,:,k) - vmean) * py
         end do
@@ -191,7 +191,7 @@ contains
         ! Subtract part of temperature field that is used as reference for
         ! implicit terms
 
-        !$omp do private(k)
+        !$omp do private(k) schedule(static)
         do k = 1, kx
             tgg(:,:,k) = tg(:,:,k) - tref(k)
         end do
@@ -213,13 +213,13 @@ contains
         temp(:,:,kx+1) = 0.0
 #endif
 
-        !$omp do private(k)
+        !$omp do private(k) schedule(static)
         do k = 2, kx
             temp(:,:,k) = sigdt(:,:,k) * (ug(:,:,k) - ug(:,:,k-1))
         end do
         !$omp end do
         
-        !$omp do private(k)
+        !$omp do private(k) schedule(static)
         do k = 1, kx
             utend(:,:,k) = vg(:,:,k) * vorg(:,:,k) - tgg(:,:,k)*rgas*px &
                 & - (temp(:,:,k+1) + temp(:,:,k))*dhsr(k)
@@ -228,13 +228,13 @@ contains
 
         ! Meridional wind tendency
 
-        !$omp do private(k)
+        !$omp do private(k) schedule(static)
         do k = 2, kx
             temp(:,:,k) = sigdt(:,:,k) * (vg(:,:,k) - vg(:,:,k-1))
         end do
         !$omp end do
 
-        !$omp do private(k)
+        !$omp do private(k) schedule(static)
         do k = 1, kx
             vtend(:,:,k) = -ug(:,:,k)*vorg(:,:,k) - tgg(:,:,k)*rgas*py &
                 & - (temp(:,:,k+1) + temp(:,:,k))*dhsr(k)
@@ -243,14 +243,14 @@ contains
 
         ! Temperature tendency
 
-        !$omp do private(k)
+        !$omp do private(k) schedule(static)
         do k = 2, kx
             temp(:,:,k) = sigdt(:,:,k)*(tgg(:,:,k) - tgg(:,:,k-1)) &
                 & + sigm(:,:,k)*(tref(k) - tref(k-1))
         end do
         !$omp end do
 
-        !$omp do private(k)
+        !$omp do private(k) schedule(static)
         do k = 1, kx
             ttend(:,:,k) = tgg(:,:,k)*divg(:,:,k) - (temp(:,:,k+1)+temp(:,:,k))*dhsr(k) &
                 & + fsgr(k)*tgg(:,:,k)*(sigdt(:,:,k+1) + sigdt(:,:,k)) + tref3(k)*(sigm(:,:,k+1) &
@@ -260,7 +260,7 @@ contains
 
         ! Tracer tendency
 
-        !$omp do private(itr, k)
+        !$omp do private(itr, k) schedule(guided)
         do itr = 1, ntr
             do k = 2, kx
                 temp(:,:,k) = sigdt(:,:,k)*(trg(:,:,k,itr) - trg(:,:,k-1,itr))
@@ -283,16 +283,15 @@ contains
         phi = get_geopotential(t(:,:,:,j1), phis)
 
         !!! TODO: make [get_physical_tendencies] multi-threaded and thread-safe
-        
         call get_physical_tendencies(vor(:,:,:,j1), div(:,:,:,j1), t(:,:,:,j1), tr(:,:,:,j1,1), &
             & phi, ps(:,:,j1), utend, vtend, ttend, trtend)
-
+                
         ! =========================================================================
         ! Convert tendencies to spectral space
         ! =========================================================================
 
-        !$omp parallel default(shared) private(k, itr, dumc)
-        !$omp do schedule(static)
+        !$omp parallel
+        !$omp do private(k, itr, dumc) schedule(guided)
         do k = 1, kx
             !  Convert u and v tendencies to vor and div spectral tendencies
             !  vdspec takes a grid u and a grid v and converts them to
@@ -317,6 +316,7 @@ contains
             end do
         end do
         !$omp end do
+
         !$omp end parallel
     end subroutine
 
