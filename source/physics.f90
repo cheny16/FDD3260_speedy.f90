@@ -237,6 +237,7 @@ contains
 
         ! Add tendencies due to surface fluxes
 
+#ifdef _OPENMP
         !$omp do schedule(static)
         do k = 1, kx
             if (k == kx) then
@@ -256,7 +257,18 @@ contains
             qtend(:,:,k) = qtend(:,:,k) + qt_pbl(:,:,k)
         end do
         !$omp end do
-        
+#else
+        ut_pbl(:,:,kx) = ut_pbl(:,:,kx) + ustr(:,:,3)*rps*grdsig(kx)
+        vt_pbl(:,:,kx) = vt_pbl(:,:,kx) + vstr(:,:,3)*rps*grdsig(kx)
+        tt_pbl(:,:,kx) = tt_pbl(:,:,kx)  + shf(:,:,3)*rps*grdscp(kx)
+        qt_pbl(:,:,kx) = qt_pbl(:,:,kx) + evap(:,:,3)*rps*grdsig(kx)
+
+        utend = utend + ut_pbl
+        vtend = vtend + vt_pbl
+        ttend = ttend + tt_pbl
+        qtend = qtend + qt_pbl
+#endif     
+           
         ! !$omp single
         !     !$omp task depend(out: ut_pbl)
         !     ut_pbl(:,:,kx) = ut_pbl(:,:,kx) + ustr(:,:,3)*rps*grdsig(kx)
