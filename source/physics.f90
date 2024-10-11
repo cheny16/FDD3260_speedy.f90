@@ -90,8 +90,12 @@ contains
         ! =========================================================================
         ! Compute grid-point fields
         ! =========================================================================
-
+        
         ! Convert model spectral variables to grid-point variables
+        
+        !$omp parallel default(shared) private(k, i, j, ucos, vcos)
+
+        !$omp do schedule(guided)
         do k = 1, kx
             call uvspec(vor(:,:,k), div(:,:,k), ucos, vcos)
             ug(:,:,k)   = spec_to_grid(ucos, 2)
@@ -100,42 +104,64 @@ contains
             qg(:,:,k)   = spec_to_grid(q(:,:,k), 1)
             phig(:,:,k) = spec_to_grid(phi(:,:,k), 1)
         end do
-
+        !$omp end do
+        
+        !$omp single
         pslg = spec_to_grid(psl, 1)
+        !$omp end single
 
         ! =========================================================================
         ! Compute thermodynamic variables
         ! =========================================================================
 
+        !$omp single
         psg = exp(pslg)
         rps = 1.0/psg
 
         qg = max(qg, 0.0)
         se = cp*tg + phig
+        !$omp end single
 
+        !$omp do schedule(static)
         do k = 1, kx
             call spec_hum_to_rel_hum(tg(:,:,k), psg, fsg(k), qg(:,:,k), rh(:,:,k), qsat(:,:,k))
         end do
+        !$omp end do
 
         ! =========================================================================
         ! Precipitation
         ! =========================================================================
 
         ! Deep convection
-        call get_convection_tendencies(psg, se, qg, qsat, iptop, cbmf, precnv, tt_cnv, qt_cnv)
 
+        !$omp single
+        call get_convection_tendencies(psg, se, qg, qsat, iptop, cbmf, precnv, tt_cnv, qt_cnv)
+        !$omp end single
+
+        !$omp do schedule(static)
         do k = 2, kx
             tt_cnv(:,:,k) = tt_cnv(:,:,k)*rps*grdscp(k)
             qt_cnv(:,:,k) = qt_cnv(:,:,k)*rps*grdsig(k)
         end do
+        !$omp end do
 
         icnv = kx - iptop
 
         ! Large-scale condensation
-        call get_large_scale_condensation_tendencies(psg, qg, qsat, iptop, precls, tt_lsc, qt_lsc)
 
-        ttend = ttend + tt_cnv + tt_lsc
-        qtend = qtend + qt_cnv + qt_lsc
+        !$omp single
+        call get_large_scale_condensation_tendencies(psg, qg, qsat, iptop, precls, tt_lsc, qt_lsc)
+        !$omp end single
+
+        !$omp single
+            !$omp task
+            ttend = ttend + tt_cnv + tt_lsc
+            !$omp end task
+
+            !$omp task
+            qtend = qtend + qt_cnv + qt_lsc
+            !$omp end task
+        !$omp end single nowait
 
         ! =========================================================================
         ! Radiation (shortwave and longwave) and surface fluxes
@@ -144,6 +170,7 @@ contains
         ! Compute shortwave tendencies and initialize lw transmissivity
         ! The shortwave radiation may be called at selected time steps
         if (compute_shortwave) then
+            !$omp single
             gse = (se(:,:,kx-1) - se(:,:,kx))/(phig(:,:,kx-1) - phig(:,:,kx))
 
             call clouds(qg, rh, precnv, precls, iptop, gse, fmask_l, icltop, cloudc, clstr)
@@ -160,23 +187,34 @@ contains
             do k = 1, kx
                 tt_rsw(:,:,k) = tt_rsw(:,:,k)*rps*grdscp(k)
             end do
+            !$omp end single
         end if
 
         ! Compute downward longwave fluxes
+        
+        !$omp single
         call get_downward_longwave_rad_fluxes(tg, slrd, tt_rlw)
+        !$omp end single
 
         ! Compute surface fluxes and land skin temperature
+        
+        !$omp single
         call get_surface_fluxes(psg, ug, vg, tg, qg, rh, phig, phis0, fmask_l, sst_am, &
                 & ssrd, slrd, ustr, vstr, shf, evap, slru, hfluxn, ts, tskin, u0, v0, t0, .true.)
-
+        !$omp end single
+        
         ! Recompute sea fluxes in case of anomaly coupling
         if (sea_coupling_flag > 0) then
-           call get_surface_fluxes(psg, ug, vg, tg, qg, rh, phig, phis0, fmask_l, ssti_om, &
+            !$omp single
+            call get_surface_fluxes(psg, ug, vg, tg, qg, rh, phig, phis0, fmask_l, ssti_om, &
                    & ssrd, slrd, ustr, vstr, shf, evap, slru, hfluxn, ts, tskin, u0, v0, t0, .false.)
+            !$omp end single
         end if
 
         ! Compute upward longwave fluxes, convert them to tendencies and add
         ! shortwave tendencies
+
+        !$omp single
         call get_upward_longwave_rad_fluxes(tg, ts, slrd, slru(:,:,3), slr, olr, tt_rlw)
 
         do k = 1, kx
@@ -184,31 +222,84 @@ contains
         end do
 
         ttend = ttend + tt_rsw + tt_rlw
+        !$omp end single
 
         ! =========================================================================
         ! Planetary boundary later interactions with lower troposphere
         ! =========================================================================
 
         ! Vertical diffusion and shallow convection
+
+        !$omp single
         call get_vertical_diffusion_tend(se, rh, qg, qsat, phig, icnv, ut_pbl, vt_pbl, &
             & tt_pbl, qt_pbl)
+        !$omp end single
 
         ! Add tendencies due to surface fluxes
-        ut_pbl(:,:,kx) = ut_pbl(:,:,kx) + ustr(:,:,3)*rps*grdsig(kx)
-        vt_pbl(:,:,kx) = vt_pbl(:,:,kx) + vstr(:,:,3)*rps*grdsig(kx)
-        tt_pbl(:,:,kx) = tt_pbl(:,:,kx)  + shf(:,:,3)*rps*grdscp(kx)
-        qt_pbl(:,:,kx) = qt_pbl(:,:,kx) + evap(:,:,3)*rps*grdsig(kx)
 
-        utend = utend + ut_pbl
-        vtend = vtend + vt_pbl
-        ttend = ttend + tt_pbl
-        qtend = qtend + qt_pbl
+        !$omp do schedule(static)
+        do k = 1, kx
+            if (k == kx) then
+                ut_pbl(:,:,k) = ut_pbl(:,:,k) + ustr(:,:,3) * rps * grdsig(k)
+                vt_pbl(:,:,k) = vt_pbl(:,:,k) + vstr(:,:,3) * rps * grdsig(k)
+                tt_pbl(:,:,k) = tt_pbl(:,:,k) + shf(:,:,3)  * rps * grdscp(k)
+                qt_pbl(:,:,k) = qt_pbl(:,:,k) + evap(:,:,3) * rps * grdsig(k)
+            end if
+        end do
+        !$omp end do
+
+        !$omp do schedule(static)
+        do k = 1, kx
+            utend(:,:,k) = utend(:,:,k) + ut_pbl(:,:,k)
+            vtend(:,:,k) = vtend(:,:,k) + vt_pbl(:,:,k)
+            ttend(:,:,k) = ttend(:,:,k) + tt_pbl(:,:,k)
+            qtend(:,:,k) = qtend(:,:,k) + qt_pbl(:,:,k)
+        end do
+        !$omp end do
+        
+        ! !$omp single
+        !     !$omp task depend(out: ut_pbl)
+        !     ut_pbl(:,:,kx) = ut_pbl(:,:,kx) + ustr(:,:,3)*rps*grdsig(kx)
+        !     !$omp end task
+
+        !     !$omp task depend(out: vt_pbl)
+        !     vt_pbl(:,:,kx) = vt_pbl(:,:,kx) + vstr(:,:,3)*rps*grdsig(kx)
+        !     !$omp end task
+            
+        !     !$omp task depend(out: tt_pbl)
+        !     tt_pbl(:,:,kx) = tt_pbl(:,:,kx)  + shf(:,:,3)*rps*grdscp(kx)
+        !     !$omp end task
+
+        !     !$omp task depend(out: qt_pbl)
+        !     qt_pbl(:,:,kx) = qt_pbl(:,:,kx) + evap(:,:,3)*rps*grdsig(kx)
+        !     !$omp end task
+
+        !     !$omp task depend(in: ut_pbl)
+        !     utend = utend + ut_pbl
+        !     !$omp end task
+
+        !     !$omp task depend(in: vt_pbl)
+        !     vtend = vtend + vt_pbl
+        !     !$omp end task
+
+        !     !$omp task depend(in: tt_pbl)
+        !     ttend = ttend + tt_pbl
+        !     !$omp end task
+
+        !     !$omp task depend(in: qt_pbl)
+        !     qtend = qtend + qt_pbl
+        !     !$omp end task
+        ! !$omp end single
 
         ! Add SPPT noise
         if (sppt_on) then
+            !$omp single
             sppt_pattern = gen_sppt()
+            !$omp end single
 
             ! The physical contribution to the tendency is *tend - *tend_dyn, where * is u, v, t, q
+
+            !$omp do schedule(static) private(k)
             do k = 1,kx
                 utend(:,:,k) = (1 + sppt_pattern(:,:,k)*mu(k))*(utend(:,:,k) - utend_dyn(:,:,k)) &
                         & + utend_dyn(:,:,k)
@@ -219,6 +310,8 @@ contains
                 qtend(:,:,k) = (1 + sppt_pattern(:,:,k)*mu(k))*(qtend(:,:,k) - qtend_dyn(:,:,k)) &
                         & + qtend_dyn(:,:,k)
             end do
+            !$omp end do
         end if
+        !$omp end parallel
     end
 end module
